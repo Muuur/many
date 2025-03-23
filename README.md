@@ -1,6 +1,6 @@
-# Many
+# Many 6.1
 
-This program search and count files or file sizes in directories with filters
+This program search and count how many files, or file sizes there are in specified directories with glob filters
 
 ---
 
@@ -8,8 +8,125 @@ Muuur - 2020
 
 ---
 
-##Version history
+## Requirements
 
+```bash
+# Install all packages
+pip install -r requirements.txt
+```
+
+```bash
+# Or you can install the latest version
+pip install colorama types-colorama
+```
+
+# How to execute
+
+```bash
+# Get help
+many -h
+
+# Count all things in current directory
+many
+
+# Count files in directory 'foo'
+many -a foo
+
+# Count block devices recursively in '/dev' with numeric output
+many -nbs /dev
+```
+
+## Filter processing
+
+Any positional argument will be treated as a filter, they are primary differenced into 3 types:
+
+1. Directories: if os.isdir(filter), then is treated as a directory.
+
+2. NoDir entry: elif '/' in filter, then is a NoDir entry, it will be explained then.
+
+3. filter: else, if the filter is not from above categories, it will be treated as file filter
+
+Then, al entries will be converted into NoDir entries, a NoDir entry is a directory path followed by a glob filter.
+So, the directories will be mixed with filters with itertools.permutations function to create all NoDir entries.
+Then, the NoDir themselves will be added to filter list.
+For example, positional arguments `foo bar baz/*.mp3 *.pdf a*` will generate the following NoDir entries: `foo/*.pdf foo/a* bar/*.mp3 bar/a* baz/*.mp3`
+
+## program help
+
+```text
+usage: many [ -h | -v | [-a] [-d] [-l] [-c] [-b] [-F] [-S] [-f] [-n] [-r] [-s] [-y] [-k] [-m] [-g] [-t] [-R ROUND] [filters ...] ]
+
+Show how many regular or special files are in directories, or show file size with filters
+
+positional arguments:
+  filters               File filters or directories to apply, default all files
+
+options:
+  -h, --help            show this help message and exit
+  -a, --files           Filter files
+  -d, --dir             Filter directories
+  -l, --links           Filter symbolic links
+  -c, --char            Filter char devices
+  -b, --block           Filter block devices
+  -F, --fifo            Filter fifo files
+  -S, --socket          Filter socket files
+  -f, --follow          Follow symbolic links
+  -n, --blank           Brief output, show only the number, made for $(subprocess substitution) in scripts
+  -r, --recursive       Iterate recursively over directories
+  -s, --separate        Separate over the filters. With no filters search for all extensions
+  -y, --size            Display size instead of file count. Size in B
+  -k, --kb              Display size instead of file count. Size in KB
+  -m, --mb              Display size instead of file count. Size in MB
+  -g, --gb              Display size instead of file count. Size in GB
+  -t, --tb              Display size instead of file count. Size in TB
+  -R ROUND, --round ROUND
+                        Decimal round
+  -v, --version         show program's version number and exit
+
+Tips:
+You can filter using glob shell expansion rules (like ~/Pictures/\*.png)
+Filters should be escaped with -r or -s, because the program may fail
+,it is optimized to perform with escaped filters, and the output will be cleaner
+
+Colors:
+    Blue indicates directories and/or filteres
+    Green indicates file types
+    Yellow indicates figures
+    Red indicates errors
+    Magenta indicates warnings
+
+Warnings:
+    With -ykmgbt (size), the parameters -adlcbFS (file type) are ignored
+    -R (size round) is ignored without -ykmgbt (size)
+    -l (search links) is ignored with -f (follow links)
+    Default filter is -ad (files and directories)
+                    Default floating point round is 2
+
+Restrictions:
+    You must specify at least two filters to use -s, or use it with -r
+    You cannot separate with blank output, -s is incompatible with -n
+                
+Filter types
+    Filters are firstly divided into three categories: filters, directories and NoDir
+    A NoDir entry is a directory followed by a filter in the same parameter.
+    The filters are classified using the following criteria:
+        If the directory exists, then is a directory
+        Elif the entry has directory separators inside, then is NoDir
+        Else, a filter
+    All the directories and filters are converted into NoDir entries by cartesian product
+    and then putting them together with the rest of original NoDir entries.
+    For example, /home/$USER /media/$USER /usr/bin/python* '*.pdf' '*.mp4' gives:
+        /home/$USER/*.pdf
+        /home/$USER/*.mp4
+        /media/$USER/*.pdf
+        /media/$USER/*.mp4
+        /usr/bin/python*
+    Default is ./*
+```
+
+## Version history
+
+```text
 1.0   -> Show files and/or directories, parameters -ads, classify between dirs and filters
 1.1   -> parameter uptake is now order free, -n added
 1.5   -> -r added, minor bug fixes and new restrictions
@@ -48,3 +165,4 @@ Muuur - 2020
 5.6.2 -> Permission bug
 6.0   -> All changed to classes. Redundancy was deleted. Dires, filters and nodires were unified. Changed string to Path. Changed argv parsing to argparse.ArgumentParser.
 6.1   -> Added docstrings
+```
