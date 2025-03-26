@@ -1,13 +1,35 @@
 #1/usr/bin/python3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator, Self
+from typing import Iterator, Self, Optional
 from os import sep
 from sys import stdout, stderr, argv
-from itertools import chain, product, starmap
+from itertools import product, starmap
 from argparse import ArgumentParser, RawTextHelpFormatter
 from colorama import Fore
-from enums import *
+from enums import FileType, Size
+
+def isdir(file: Path, follow: bool=False) -> bool:
+    """
+    Test if the file is of a certain type and not a symlink_text, or is a symlink_text while follow flag is set
+
+    Parameters
+    ----------
+    file: Path
+        The file path to test
+
+    test: str
+        The attribute to test, like is_file
+
+    follow: bool
+        Whether to follow symlinks or not
+
+    Returns
+    -------
+    issth: bool
+        Whether the test has passed or not
+    """
+    return file.is_dir() and (not file.is_symlink() or follow)
 
 @dataclass
 class NoDir():
@@ -23,14 +45,22 @@ class NoDir():
         The filter to search for in the directory.
         The default is None, that means all contents (*).
     """
-    path:   Path
-    filter: str = '*'
+    _path:   Path
+    _filter: str = '*'
 
     def __repr__(self) -> str:
-        return f"NoDir(path={self.path}, filter={self.filter})"
+        return f"NoDir(path={self._path}, filter={self._filter})"
 
     def __hash__(self) -> int:
         return hash(self.join())
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    @property
+    def filter(self) -> str:
+        return self._filter
 
     @classmethod
     def frompath(cls, nodir: Path) -> 'NoDir':
@@ -63,11 +93,11 @@ class NoDir():
         join: str
             The path representation in string format
         """
-        return self.path.joinpath(self.filter).as_posix()
+        return self._path.joinpath(self._filter).as_posix()
     
     def glob(self) -> Iterator[Path]:
         """
-        Search for files in the directory self.path matching self.filter with shell expansion
+        Search for files in the directory self._path matching self._filter with shell expansion
         
         Parameters
         ----------
@@ -78,10 +108,44 @@ class NoDir():
         glob: Iterator[Path]
             An interator over the files matching the pattern in the directory
         """
-        if self.filter is None:
-            yield from self.path.iterdir()
+        yield from self._path.glob(self._filter)
+
+
+    def walk(self, recursive: bool=False, follow: bool=True, verbose: bool=True) -> Iterator[Path]:
+        """
+        Wrapper for os.walk of a NoDir entry
+        
+        Parameters
+        ----------
+        recursive: bool=False
+            Whether to read sub directories or not
+
+        follow: bool=True
+            Whether follow symlinks or not
+
+        verbose: bool=True
+            Whether to print error messages or not
+
+        Returns
+        -------
+        walk: Iterator[Path]
+            Iterates over all directories recurvisely (or not) over the tree
+        """
+        if recursive:
+            ddires = [self._path]
+            while len(ddires) > 0:
+                last = ddires.pop()
+                yield last
+                try:
+                    tmp = [i for i in last.iterdir() if isdir(i, follow)]
+                    if len(tmp) > 0:
+                        tmp.reverse()
+                        ddires.extend(tmp)
+                except PermissionError as prm:
+                    if verbose:
+                        ArgvContainer.print_permission(prm)
         else:
-            yield from self.path.glob(self.filter)
+            yield self._path
 
 @dataclass
 class ArgvContainer():
@@ -116,20 +180,21 @@ class ArgvContainer():
         The filters to search for without duplicates
     """
     ftype:    FileType
-    size:     Size
+    size:     Optional[Size]
+    auto:     bool
     follow:   bool
     blank:    bool
     recr:     bool
     separate: bool
     round:    int  = 2
     _is_cd:   bool = False
-    filters:  set[NoDir] = field(default_factory=set[NoDir])
+    _filters: set[NoDir] = field(default_factory=set[NoDir])
 
     def __len__(self) -> int:
-        return len(self.filters)
+        return len(self._filters)
     
     def __iter__(self) -> Iterator[NoDir]:
-        yield from self.filters
+        yield from self._filters
 
     @property
     def is_cd(self) -> int:
@@ -149,7 +214,7 @@ class ArgvContainer():
         repr_filters: str
             The string representation of the filters
         """
-        return f'{Fore.LIGHTBLUE_EX}{sep.join(map(NoDir.join, self.filters))}{Fore.RESET}'
+        return f'{Fore.LIGHTBLUE_EX}{sep.join(map(NoDir.join, self._filters))}{Fore.RESET}'
 
     def parse(self, filters: list[str]) -> Self:
         """
@@ -184,10 +249,7 @@ class ArgvContainer():
                 dires.append(Path())
                 self._is_cd = True
             if len(filt) == 0:
-                if self.separate and not self.recr:
-                    filt.update(f"*{file.suffix}" for file in chain(*map(Path.iterdir, dires)) if self.issth("is_file", file))
-                else:
-                    filt.add("*")
+                filt.add("*")
         elif len(dires) == 0:
             if len(filt) > 0:
                 filt.clear()
@@ -195,36 +257,8 @@ class ArgvContainer():
             filt.add("*")
 
         nodires.extend(starmap(NoDir, product(dires, filt)))
-        self.filters = set(nodires) if len(nodires) > 0 else {NoDir(Path())}
+        self._filters = set(nodires) if len(nodires) > 0 else {NoDir(Path())}
         return self
-
-    def match_type(self, dir: NoDir) -> Iterator[Path]:
-        """
-        Search for the files in the direcotry associated with the corresponding filter
-        
-        Parameters
-        ----------
-        dir: NoDir
-            The NoDir object that contains the files
-        
-        Returns
-        -------
-        match_type: Iterator[Path]
-            An iterator over the resulting files choosing the ones that match the requirements
-        """
-        for file in dir.glob():
-            if file.is_symlink():
-                if self.ftype & FileType.LINK == FileType.LINK:
-                    yield file
-                elif not self.follow:
-                    continue
-            if (self.ftype & FileType.FILE and file.is_file()) or \
-                (self.ftype & FileType.DIR and file.is_dir()) or \
-                (self.ftype & FileType.FIFO and file.is_fifo()) or \
-                (self.ftype & FileType.CHAR and file.is_char_device()) or \
-                (self.ftype & FileType.BLOCK and file.is_block_device()) or \
-                (self.ftype & FileType.SOCKET and file.is_socket()):
-                yield file
 
     def file_repr(self) -> str:
         """
@@ -244,7 +278,7 @@ class ArgvContainer():
             repr += "files, "
         if self.ftype & FileType.DIR:
             repr += "directories, "
-        if self.ftype & FileType.LINK and not self.follow:
+        if self.ftype & FileType.LINK:
             repr += "links, "
         if self.ftype & FileType.CHAR:
             repr += "char devices, "
@@ -255,49 +289,6 @@ class ArgvContainer():
         if self.ftype & FileType.SOCKET:
             repr += "socket, "
         return f'{Fore.LIGHTGREEN_EX}{repr[:-2]}{Fore.RESET}'
-
-    def walk(self) -> Iterator[NoDir]:
-        """
-        Wrapper for os.walk of a NoDir entry
-        
-        Parameters
-        ----------
-        None
-
-        Returns
-        -------
-        walk: Iterator[NoDir]
-            Iterates over all files and directories recurvisely (or not) over the tree
-            This function won't operate recursively if the recr flag is not set
-        """
-        if self.recr:
-            ddires = list(self.filters)[::-1]
-            while len(ddires) > 0:
-                last = ddires.pop()
-                yield last
-                try:
-                    tmp = [NoDir(i, last.filter) for i in last.path.iterdir() if self.issth("is_dir", i)]
-                    if len(tmp) > 0:
-                        tmp.reverse()
-                        ddires.extend(tmp)
-                except PermissionError as prm:
-                    ArgvContainer.print_permission(prm)
-        else:
-            yield from self.filters
-
-    def issth(self, sth: str, test: Path) -> bool:
-        """
-        Test if the file is of a certain type and not a symlink_text, or is a symlink_text while follow flag is set
-
-        Parameters
-        ----------
-        sth: str
-            The file type to test
-        
-        test: Path
-            The file to test type
-        """
-        return getattr(test, sth)() and (not test.is_symlink() or (self.follow and test.is_symlink()))
 
     def reducesize(self, num: float) -> float:
         """
@@ -313,6 +304,22 @@ class ArgvContainer():
         reducesize: float
             The number converted into other unit
         """
+        if self.auto:
+            iterator = iter(Size)
+            prev     = next(iterator)
+            res      = num
+            tmpnum   = num
+
+            for size in iterator:
+                tmpnum /= 1024
+                if tmpnum < 1:
+                    self.size = prev
+                    return round(res, self.round)
+                prev = size
+                res = tmpnum
+            self.size = size
+            return round(tmpnum, self.round)
+
         match self.size:
             case Size.KB:
                 res = num / 2**10
@@ -325,6 +332,32 @@ class ArgvContainer():
             case _:
                 res = num
         return round(res, self.round)
+
+    def match_type(self, file: Path) -> bool:
+        """
+        Search for the files in the direcotry associated with the corresponding filter
+        
+        Parameters
+        ----------
+        file: Path
+            The file to test if it is a valid ftype
+        
+        Returns
+        -------
+        match_type: bool
+            Whether the file specified matches type
+        """
+        if file.is_symlink():
+            if self.ftype & FileType.LINK == FileType.LINK:
+                return True
+            elif not self.follow:
+                return False
+        return (self.ftype & FileType.FILE and file.is_file()) or \
+            (self.ftype & FileType.DIR and file.is_dir()) or \
+            (self.ftype & FileType.FIFO and file.is_fifo()) or \
+            (self.ftype & FileType.CHAR and file.is_char_device()) or \
+            (self.ftype & FileType.BLOCK and file.is_block_device()) or \
+            (self.ftype & FileType.SOCKET and file.is_socket())
 
     @staticmethod
     def print_permission(perror: PermissionError) -> None:
@@ -363,31 +396,31 @@ class ArgvContainer():
         parser = ArgumentParser(
             description="Show how many regular or special files or folders are in directories, or show file size",
             epilog=f"""Tips:
-				You can filter using glob shell expansion rules (like {'~/Pictures/\\*.png' if sep == '/' else 'D:/images/*.jpg'.replace("/", sep)})
-				Filters should be {under}escaped{reset} with -r or -s, because the program may fail
-				,it is optimized to perform with escaped filters, and the output will be cleaner
+				You can filter using glob shell expansion rules (like ~/Pictures/\\*.png)
+				Filters should be {under}escaped{reset} with -r or -s, the program may fail because
+				it is optimized to run with shell-escaped glob filters, the output will be more readable also
 
 				{bold}Colors{reset}:
-				    Blue indicates directories and/or filteres
-				    Green indicates file types
-				    Yellow indicates figures
-				    Red indicates errors
-				    Magenta indicates warnings
+				    - Blue for directory and/or filter names
+				    - Green for file types
+				    - Yellow for figures
+				    - Red for errors
+				    - Magenta for warnings
 
 				{bold}Warnings{reset}:
-				    With -ykmgbt (size), the parameters -adlcbFS (file type) are ignored
-				    -R (size round) is ignored without -ykmgbt (size)
-				    -l (search links) is ignored with -f (follow links)
-				    Default filter is -ad (files and directories)
-                    Default floating point round is 2
+				    - -ykmgbt (size) ignore the parameters -adlcbFS (file type)
+				    - -R (size round) is ignored without -ykmgbt (size)
+				    - Default file type filter is -ad (files and directories) for counting,
+				      and -a (files) for size count.
+				    - Default floating point round is 2.
 
 				{bold}Restrictions{reset}:
-				    You must specify at least two filters to use -s, or use it with -r
-				    You cannot separate with blank output, -s is incompatible with -n
-                
+				    - You must specify at least two filters to use -s, or use it with -r
+				    - You cannot separate with blank output, -s is incompatible with -n
+
 				{bold}Filter types{reset}
-				    Filters are firstly divided into three categories: filters, directories and NoDir
-				    A NoDir entry is a directory followed by a filter in the same parameter.
+				    - Filters are firstly divided into three categories: filters, directories and NoDir
+				    - A NoDir entry is a directory followed by a filter in the same parameter.
 				    The filters are classified using the following criteria:
 				        If the directory exists, then is a directory
 				        Elif the entry has directory separators inside, then is NoDir
@@ -416,17 +449,18 @@ class ArgvContainer():
         parser.add_argument("-r", "--recursive", action="store_true", help="Iterate recursively over directories", dest="recursive")
         parser.add_argument("-s", "--separate", action="store_true", help="Separate over the filters. With no filters search for all extensions", dest="sep")
 
-        parser.add_argument("-y", "--size", action="store_const", dest="size", const=Size.B, help="Display size instead of file count. Size in B")
+        parser.add_argument("-y", "--bytes", action="store_const", dest="size", const=Size.B, help="Display size instead of file count. Size in B")
         parser.add_argument("-k", "--kb", action="store_const", dest="size", const=Size.KB, help="Display size instead of file count. Size in KB")
         parser.add_argument("-m", "--mb", action="store_const", dest="size", const=Size.MB, help="Display size instead of file count. Size in MB")
         parser.add_argument("-g", "--gb", action="store_const", dest="size", const=Size.GB, help="Display size instead of file count. Size in GB")
         parser.add_argument("-t", "--tb", action="store_const", dest="size", const=Size.TB, help="Display size instead of file count. Size in TB")
+        parser.add_argument("-u", "--auto", action="store_true", dest="auto", help="Display size instead of file count. Size is computed automatically")
         
         parser.add_argument("-R", "--round", type=int, dest="round", help="Decimal round", required=False, default=2)
 
         parser.add_argument("filters", nargs='*', help="File filters or directories to apply, default all files")
 
-        parser.add_argument("-v", "--version", action="version", version="6.0")
+        parser.add_argument("-v", "--version", action="version", version="6.2")
         # parser.add_argument("-h", "-?", "--help", action="help")
 
         argparse = parser.parse_args(args)
@@ -435,11 +469,12 @@ class ArgvContainer():
         return cls(
             follow=argparse.follow,
             ftype=ftype,
-            size=argparse.size,
+            size=Size.B if argparse.auto else argparse.size ,
             blank=argparse.blank,
             recr=argparse.recursive,
             separate=argparse.sep,
-            round=argparse.round
+            round=argparse.round,
+            auto=argparse.auto
         ).parse(argparse.filters)
 
 __all__ = ["ArgvContainer", "NoDir"]

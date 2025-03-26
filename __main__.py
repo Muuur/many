@@ -12,8 +12,8 @@ from re import sub
 from pathlib import Path
 from typing import NoReturn
 from colorama import init, Fore
-from enums import *
-from mainclass import *
+from enums import FileType
+from mainclass import ArgvContainer
 
 def die(msg: str, code: int=1) -> NoReturn:
     """
@@ -31,13 +31,17 @@ def die(msg: str, code: int=1) -> NoReturn:
     -------
     NoReturn
     """
-    print(sub(r'^ *', '', msg), file=stderr, end="\n\n")
-    print(f"Please write `{Path(argv[0]).name} --help` to get help", file=stderr)
+    print(
+        sub(r'^ *', '', msg),
+        f"Please run `{Path(argv[0]).name} --help` to get help",
+        file=stderr,
+        sep="\n\n"
+    )
     exit(code)
 
 def main(argv: list[str]=argv) -> int:
     """
-    Main function, it performs all of the operations to count files or size
+    Main function, it performs all of the operations to count files or get file sizes
     
     Parameters
     ----------
@@ -47,7 +51,7 @@ def main(argv: list[str]=argv) -> int:
     Returns
     -------
     main: int
-        Status code, 0 if no error happened, 1 otherwise
+        Status code, 0 if die was not called
     """
     init()
     aux, sumsize = 0, 0
@@ -74,73 +78,73 @@ def main(argv: list[str]=argv) -> int:
     argvcont = ArgvContainer.parse_args(argv[1:])
 
     # ! Restrictions
-    if argvcont.separate and argvcont.blank:
-        die(f"many: You {Fore.RED}cannot{Fore.RESET} separate output and run it blank, -s is incompatible with -n")
+    if argvcont.separate:
+        if argvcont.blank:
+            die(f"many: You {Fore.RED}cannot{Fore.RESET} separate output and run it blank, -s is incompatible with -n")
+        elif not argvcont.recr and len(argvcont) < 2:
+            die(f"You can't separate output with less than 2 filters or without recursive flag")
     elif argvcont.separate and (not argvcont.recr and len(argvcont) == 1):
         die(f"many: You {Fore.RED}must specify{Fore.RED} -r or at least two {Fore.LIGHTGREEN_EX}filters{Fore.RESET} to use -s")
-    elif argvcont.ftype & FileType.LINK and argvcont.follow:
-        print(f"many: {Fore.LIGHTMAGENTA_EX}warning{Fore.RESET} you {Fore.RED}can't{Fore.RESET} count symbolic links while follow them, -l is {Fore.RED}incompatible{Fore.RESET} with -f", file=stderr)
-        argvcont.ftype = argvcont.ftype & ~ FileType.LINK
+    # elif argvcont.ftype & FileType.LINK and argvcont.follow:
+    #     print(f"many: {Fore.LIGHTMAGENTA_EX}warning{Fore.RESET} you {Fore.RED}can't{Fore.RESET} count symbolic links while follow them, -l is {Fore.RED}incompatible{Fore.RESET} with -f", file=stderr)
+    #     argvcont.ftype = argvcont.ftype & ~ FileType.LINK
+    elif argvcont.size is not None and argvcont.ftype & ~ (FileType.FILE | FileType.DIR) != 0:
+        print(f"many: {Fore.LIGHTMAGENTA_EX}warning{Fore.RESET}: any file type filter like directory will be {Fore.RED}ignored{Fore.RESET} while counting size")
+        argvcont.ftype = FileType.FILE
     # ! Restrictions end
 
     recursive_text = "and subdirectories " if argvcont.recr else ""
     symlink_text   = "following symbolic links " if argvcont.follow else ""
+    recprint       = False
 
     # ! Size functionlity
     if argvcont.size is not None:
         argvcont.ftype = FileType.FILE
         sumsize = 0
+
         # ? Recursive
-        for dir in argvcont.walk():
-            aux = 0
-            for file in argvcont.match_type(dir):
-                aux += file.stat().st_size
-            aux = argvcont.reducesize(aux)
-            if argvcont.separate:
-                print(f"{argvcont.file_repr()} of {Fore.LIGHTGREEN_EX}{dir.join()}{Fore.RESET} sizes {Fore.LIGHTYELLOW_EX}{aux} {argvcont.size.value}{Fore.RESET}")
-            sumsize += aux
+        for filter in argvcont:
+            for dir in filter.walk(argvcont.recr, argvcont.follow):
+                aux = sum(
+                    file.stat(follow_symlinks=argvcont.follow).st_size \
+                    for file in dir.glob(filter.filter)     
+                    if argvcont.match_type(file)
+                )
+                sumsize += aux
+                if argvcont.separate and aux > 0:
+                    recprint = True
+                    print(f"{Fore.LIGHTYELLOW_EX}{argvcont.reducesize(aux)} {argvcont.size.value}{Fore.RESET} {argvcont.file_repr()} of {Fore.LIGHTGREEN_EX}{dir}/{filter.filter}{Fore.RESET}")
 
-        if argvcont.separate:
-            print("")
-            return 0
+        sumsize = argvcont.reducesize(sumsize)
+        if not argvcont.separate and not recprint:
+            if argvcont.blank:
+                print(sumsize)
+            elif argvcont.is_cd:
+                print(f'{Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.size.value}{Fore.RESET} {argvcont.file_repr()} {symlink_text}in {Fore.LIGHTBLUE_EX}this directory {Fore.RESET}{recursive_text}matching {argvcont.repr_filters()}')
+            else:
+                print(f'{Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.size.value}{Fore.RESET} {argvcont.file_repr()} {recursive_text}{symlink_text}matching {argvcont.repr_filters()}')
+        # ! First ending, with size
+    else:
+        # ! File count functionality
+        for filter in argvcont:
+            for dir in filter.walk(argvcont.recr, argvcont.follow):
+                aux = sum(1 for file in dir.glob(filter.filter) if argvcont.match_type(file))
+                sumsize += aux
+                if argvcont.separate and aux > 0:
+                    recprint = True
+                    print(f"{Fore.LIGHTYELLOW_EX}{aux} {argvcont.file_repr()} matching {Fore.LIGHTBLUE_EX}{dir}/{filter.filter}{Fore.RESET}")
 
-        if argvcont.blank:
-            print(sumsize)
-        elif sumsize == 0:
-            print(f"No {argvcont.file_repr()} was found, they are {Fore.LIGHTRED_EX}empty{Fore.RESET} or the size is {Fore.LIGHTYELLOW_EX}too low{Fore.RESET} to show digits with this size modifier")
-        elif argvcont.is_cd:
-            print(f'The {argvcont.file_repr()} of {Fore.LIGHTBLUE_EX}this directory {Fore.RESET}{recursive_text}sizes {Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.size.value}{Fore.RESET} for filters: {argvcont.repr_filters()} {symlink_text}')
-        else:
-            print(f'The {argvcont.file_repr()} of {argvcont.repr_filters()} {recursive_text}sizes {Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.size.value}{Fore.RESET} {symlink_text}')
-        return 0
-    # ! First ending, with size
-
-    # ! File count functionality
-    if argvcont.separate:
-        if argvcont.is_cd:
-            print(f"In {Fore.LIGHTBLUE_EX}this directory{Fore.RESET} {recursive_text}there are:\n")
-        elif len(argvcont) > 1: # Con directorios
-            print(f"For {argvcont.repr_filters()} {recursive_text}{symlink_text}there are:\n")
-    
-    for dir in argvcont.walk():
-        aux = 0
-        for file in argvcont.match_type(dir):
-            aux += 1
-        sumsize += aux
-        if argvcont.separate and aux > 0:
-            print(f"There are {Fore.LIGHTYELLOW_EX}{aux} {argvcont.file_repr()} for {Fore.LIGHTBLUE_EX}{dir.join()}{Fore.RESET}")
-
-    # ? if -s -> all is said
-    if not argvcont.separate:
-        if argvcont.blank:
-            print(sumsize)
-        elif sumsize == 0:
-            print(f"No {argvcont.file_repr()} were found for filters {argvcont.repr_filters()} {recursive_text} {symlink_text}")
-        elif argvcont.is_cd:
-            print(f"In this {Fore.LIGHTBLUE_EX}directory {recursive_text}{Fore.RESET}there are {Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.file_repr()}{symlink_text} matching {argvcont.repr_filters()}")
-        else:
-            print(f"For filters {argvcont.repr_filters()} {recursive_text}there are {Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.file_repr()} {symlink_text}")
+        # ? if -s -> all is said
+        if not argvcont.separate and not recprint:
+            if argvcont.blank:
+                print(sumsize)
+            elif argvcont.is_cd:
+                print(f"{Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.file_repr()} {symlink_text}in this {Fore.LIGHTBLUE_EX}directory {Fore.RESET}{recursive_text}matching {argvcont.repr_filters()}")
+            else:
+                print(f"{Fore.LIGHTYELLOW_EX}{sumsize} {argvcont.repr_filters()} {recursive_text}{symlink_text}matching {argvcont.file_repr()}")
     # ! Second ending (without size)
+
+    return 0
 
 if __name__ == '__main__':
     exit(main())

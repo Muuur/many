@@ -1,4 +1,4 @@
-# Many 6.1
+# Many 6.2
 
 This program search and count how many files, or file sizes there are in specified directories with glob filters
 
@@ -8,16 +8,22 @@ Muuur - 2020
 
 ---
 
-## Requirements
+## Getting the package
 
 ```bash
-# Install all packages
-pip install -r requirements.txt
+# Get the repository
+git clone https://github.com/Muuur/many
+cd many
 ```
 
+## Installing the package
+
 ```bash
-# Or you can install the latest version
-pip install colorama types-colorama
+# With bash
+bash install.sh
+
+# Or
+./install.sh
 ```
 
 # How to execute
@@ -54,9 +60,9 @@ For example, positional arguments `foo bar baz/*.mp3 *.pdf a*` will generate the
 ## program help
 
 ```text
-usage: many [ -h | -v | [-a] [-d] [-l] [-c] [-b] [-F] [-S] [-f] [-n] [-r] [-s] [-y] [-k] [-m] [-g] [-t] [-R ROUND] [filters ...] ]
+usage: many [-h] [-a] [-d] [-l] [-c] [-b] [-F] [-S] [-f] [-n] [-r] [-s] [-y] [-k] [-m] [-g] [-t] [-u] [-R ROUND] [-v] [filters ...]
 
-Show how many regular or special files are in directories, or show file size with filters
+Show how many regular or special files or folders are in directories, or show file size
 
 positional arguments:
   filters               File filters or directories to apply, default all files
@@ -74,41 +80,42 @@ options:
   -n, --blank           Brief output, show only the number, made for $(subprocess substitution) in scripts
   -r, --recursive       Iterate recursively over directories
   -s, --separate        Separate over the filters. With no filters search for all extensions
-  -y, --size            Display size instead of file count. Size in B
+  -y, --bytes           Display size instead of file count. Size in B
   -k, --kb              Display size instead of file count. Size in KB
   -m, --mb              Display size instead of file count. Size in MB
   -g, --gb              Display size instead of file count. Size in GB
   -t, --tb              Display size instead of file count. Size in TB
+  -u, --auto            Display size instead of file count. Size is computed automatically
   -R ROUND, --round ROUND
                         Decimal round
   -v, --version         show program's version number and exit
 
 Tips:
 You can filter using glob shell expansion rules (like ~/Pictures/\*.png)
-Filters should be escaped with -r or -s, because the program may fail
-,it is optimized to perform with escaped filters, and the output will be cleaner
+Filters should be escaped with -r or -s, the program may fail because
+it is optimized to run with shell-escaped glob filters, the output will be more readable also
 
 Colors:
-    Blue indicates directories and/or filteres
-    Green indicates file types
-    Yellow indicates figures
-    Red indicates errors
-    Magenta indicates warnings
+    - Blue for directory and/or filter names
+    - Green for file types
+    - Yellow for figures
+    - Red for errors
+    - Magenta for warnings
 
 Warnings:
-    With -ykmgbt (size), the parameters -adlcbFS (file type) are ignored
-    -R (size round) is ignored without -ykmgbt (size)
-    -l (search links) is ignored with -f (follow links)
-    Default filter is -ad (files and directories)
-                    Default floating point round is 2
+    - -ykmgbt (size) ignore the parameters -adlcbFS (file type)
+    - -R (size round) is ignored without -ykmgbt (size)
+    - Default file type filter is -ad (files and directories) for counting,
+      and -a (files) for size count.
+    - Default floating point round is 2.
 
 Restrictions:
-    You must specify at least two filters to use -s, or use it with -r
-    You cannot separate with blank output, -s is incompatible with -n
-                
+    - You must specify at least two filters to use -s, or use it with -r
+    - You cannot separate with blank output, -s is incompatible with -n
+
 Filter types
-    Filters are firstly divided into three categories: filters, directories and NoDir
-    A NoDir entry is a directory followed by a filter in the same parameter.
+    - Filters are firstly divided into three categories: filters, directories and NoDir
+    - A NoDir entry is a directory followed by a filter in the same parameter.
     The filters are classified using the following criteria:
         If the directory exists, then is a directory
         Elif the entry has directory separators inside, then is NoDir
@@ -163,6 +170,12 @@ Filter types
 5.5   -> get_all_dires modification aiming eficiency + symlink_text uptake change
 5.5.1 -> Another nodir bug fixed (here we go again)
 5.6.2 -> Permission bug
-6.0   -> All changed to classes. Redundancy was deleted. Dires, filters and nodires were unified. Changed string to Path. Changed argv parsing to argparse.ArgumentParser.
+6.0   -> All changed to classes.
+         Redundancy was deleted, dires, filters and nodires were unified.
+         Changed string to Path and argv parsing to argparse.ArgumentParser.
 6.1   -> Added docstrings
+6.2   -> Removed a bug with -s.
+         Removed automatic extension search without filters for -s, now -s only works for directories, not filters.
+         Removed -fl warning, now behaves as expected.
+         Added auto size.
 ```
