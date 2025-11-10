@@ -7,7 +7,7 @@ from sys import stdout, stderr, argv
 from itertools import product, starmap
 from argparse import ArgumentParser, RawTextHelpFormatter
 from colorama import Fore
-from enums import FileType, Size
+from .enums import FileType, Size
 
 def isdir(file: Path, follow: bool=False) -> bool:
     """
@@ -35,7 +35,7 @@ def isdir(file: Path, follow: bool=False) -> bool:
 class NoDir():
     """
     Main dataclass NoDir. The name is legacy, it represents a filter with a directory inside.
-    
+
     Parameters
     ----------
     path: str
@@ -66,7 +66,7 @@ class NoDir():
     def frompath(cls, nodir: Path) -> 'NoDir':
         """
         Creates a NoDir entry from a Path object
-        
+
         Parameters
         ----------
         nodir: Path
@@ -76,33 +76,48 @@ class NoDir():
         if nodir.is_dir():
             return cls(nodir)
         return cls(
-            path=nodir.parent,
-            filter=nodir.name
+            _path=nodir.parent,
+            _filter=nodir.name
         )
-    
+
     def join(self) -> str:
         """
         Represents the NoDir entry as a path string
-        
+
         Parameters
         ----------
         None
-        
+
         Returns
         -------
         join: str
             The path representation in string format
         """
         return self._path.joinpath(self._filter).as_posix()
-    
-    def glob(self) -> Iterator[Path]:
+
+    def exist_dir(self) -> bool:
         """
-        Search for files in the directory self._path matching self._filter with shell expansion
-        
+        Checks if the path is a dir or not
+
         Parameters
         ----------
         None
-        
+
+        Returns
+        -------
+        exist_dir: bool
+            Whether the directory path exists or not
+        """
+        return self._path.is_dir()
+
+    def glob(self) -> Iterator[Path]:
+        """
+        Search for files in the directory self._path matching self._filter with shell expansion
+
+        Parameters
+        ----------
+        None
+
         Returns
         -------
         glob: Iterator[Path]
@@ -111,10 +126,10 @@ class NoDir():
         yield from self._path.glob(self._filter)
 
 
-    def walk(self, recursive: bool=False, follow: bool=True, verbose: bool=True) -> Iterator[Path]:
+    def walk(self, *, recursive: bool=False, follow: bool=True, verbose: bool=True) -> Iterator[Path]:
         """
         Wrapper for os.walk of a NoDir entry
-        
+
         Parameters
         ----------
         recursive: bool=False
@@ -146,24 +161,39 @@ class NoDir():
                         ArgvContainer.print_permission(prm)
         else:
             yield self._path
+    
+    def fspath(self) -> str:
+        """
+        Converts the NoDir entry into path
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        fspath: str
+            The string path
+        """
+        return f"{self._path}/{self._filter}"
 
 @dataclass
 class ArgvContainer():
     """
     Main dataclass ARGV container.
     Keeps the argv parameters and unify the functions.
-    
+
     Parameters
     ----------
     ftype: FileType
         The file type that the program will recognise, default is FILE | DIR
-    
+
     size: Size
         The file size that the program will show, default is B (bytes)
 
     follow: bool
         Whether follow symlink_texts or not
-    
+
     blank: bool
         This parameter indicates that the output should only display the number and not any text
 
@@ -172,10 +202,10 @@ class ArgvContainer():
 
     separate: bool
         If the output will be separate between filters or not
-    
+
     round: int
         The floating point decimals to round the output, default 2
-    
+
     filters: set[NoDir]
         The filters to search for without duplicates
     """
@@ -192,7 +222,7 @@ class ArgvContainer():
 
     def __len__(self) -> int:
         return len(self._filters)
-    
+
     def __iter__(self) -> Iterator[NoDir]:
         yield from self._filters
 
@@ -240,7 +270,11 @@ class ArgvContainer():
             if pth.is_dir():
                 dires.append(pth)
             elif sep in f:
-                nodires.append(NoDir.frompath(pth))
+                tmp = NoDir.frompath(pth)
+                if tmp.exist_dir():
+                    nodires.append(tmp)
+                else:
+                    print(f"many: error: directory {tmp.path} not found", file=stderr)
             else:
                 filt.add(f)
 
@@ -309,6 +343,7 @@ class ArgvContainer():
             prev     = next(iterator)
             res      = num
             tmpnum   = num
+            size     = Size.B
 
             for size in iterator:
                 tmpnum /= 1024
@@ -352,12 +387,12 @@ class ArgvContainer():
                 return True
             elif not self.follow:
                 return False
-        return (self.ftype & FileType.FILE and file.is_file()) or \
-            (self.ftype & FileType.DIR and file.is_dir()) or \
-            (self.ftype & FileType.FIFO and file.is_fifo()) or \
-            (self.ftype & FileType.CHAR and file.is_char_device()) or \
-            (self.ftype & FileType.BLOCK and file.is_block_device()) or \
-            (self.ftype & FileType.SOCKET and file.is_socket())
+        return (self.ftype & FileType.FILE != 0 and file.is_file()) or \
+            (self.ftype & FileType.DIR != 0 and file.is_dir()) or \
+            (self.ftype & FileType.FIFO != 0 and file.is_fifo()) or \
+            (self.ftype & FileType.CHAR != 0 and file.is_char_device()) or \
+            (self.ftype & FileType.BLOCK != 0 and file.is_block_device()) or \
+            (self.ftype & FileType.SOCKET != 0 and file.is_socket())
 
     @staticmethod
     def print_permission(perror: PermissionError) -> None:
@@ -373,7 +408,7 @@ class ArgvContainer():
         -------
         None
         """
-        print(f"many: {Fore.LIGHTRED_EX}error{Fore.RESET} at reading {Fore.LIGHTBLUE_EX}{perror.filename}{Fore.RESET} -> {Fore.LIGHTYELLOW_EX}permission error{Fore.RESET}", file=stderr)
+        print(f"many: {Fore.RED}error:{Fore.RESET} could not read {Fore.LIGHTBLUE_EX}{perror.filename}{Fore.RESET} due to {Fore.LIGHTYELLOW_EX}permission error{Fore.RESET}", file=stderr)
 
     @classmethod
     def parse_args(cls, args: list[str]=argv[1:]) -> 'ArgvContainer':
@@ -455,12 +490,12 @@ class ArgvContainer():
         parser.add_argument("-g", "--gb", action="store_const", dest="size", const=Size.GB, help="Display size instead of file count. Size in GB")
         parser.add_argument("-t", "--tb", action="store_const", dest="size", const=Size.TB, help="Display size instead of file count. Size in TB")
         parser.add_argument("-u", "--auto", action="store_true", dest="auto", help="Display size instead of file count. Size is computed automatically")
-        
+
         parser.add_argument("-R", "--round", type=int, dest="round", help="Decimal round", required=False, default=2)
 
         parser.add_argument("filters", nargs='*', help="File filters or directories to apply, default all files")
 
-        parser.add_argument("-v", "--version", action="version", version="6.2")
+        parser.add_argument("-v", "--version", action="version", version="many version 6.3 | Muuur Software 2020")
         # parser.add_argument("-h", "-?", "--help", action="help")
 
         argparse = parser.parse_args(args)
