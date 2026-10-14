@@ -495,7 +495,7 @@ class ArgvContainer():
 
         parser.add_argument("filters", nargs='*', help="File filters or directories to apply, default all files")
 
-        parser.add_argument("-v", "--version", action="version", version="many version 6.3 | Muuur Software 2020")
+        parser.add_argument("-v", "--version", action="version", version="many version 6.4 | Muuur Software 2020")
         # parser.add_argument("-h", "-?", "--help", action="help")
 
         argparse = parser.parse_args(args)
