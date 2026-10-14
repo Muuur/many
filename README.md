@@ -1,4 +1,4 @@
-# Many 3.6
+# Many 6.4
 
 This program search and count for files or file sizes in a specified directories using glob filters.
 
